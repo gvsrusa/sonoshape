@@ -2,6 +2,8 @@ import { AudioProcessorConfig } from './types';
 import { globalErrorHandler } from '../errors/ErrorHandler';
 import { globalProgressManager, ProgressTracker } from '../errors/ProgressTracker';
 import { ErrorCategory, ErrorSeverity } from '../errors/ErrorTypes';
+import { AudioWorkerMessage, AudioWorkerResponse } from './AudioWorker';
+import { PerformanceMonitor } from '../performance/PerformanceMonitor';
 
 export interface FrequencyData {
   frequencies: Float32Array[];
@@ -41,12 +43,91 @@ export class AudioProcessor {
   private analyser: AnalyserNode | null = null;
   private frequencyData: Uint8Array | null = null;
   private timeData: Uint8Array | null = null;
+  private worker: Worker | null = null;
+  private performanceMonitor: PerformanceMonitor;
+  private useWebWorkers: boolean = true;
 
   constructor(private config: AudioProcessorConfig = {
     fftSize: 2048,
     windowFunction: 'hann',
     hopSize: 512
-  }) {}
+  }) {
+    this.performanceMonitor = new PerformanceMonitor();
+    const qualitySettings = this.performanceMonitor.getQualitySettings();
+    
+    // Update config based on performance settings
+    this.config.fftSize = qualitySettings.fftSize;
+    this.useWebWorkers = qualitySettings.useWebWorkers;
+    
+    // Initialize Web Worker if supported and enabled
+    if (this.useWebWorkers && typeof Worker !== 'undefined') {
+      this.initializeWorker();
+    }
+  }
+
+  /**
+   * Initialize Web Worker for audio processing
+   */
+  private initializeWorker(): void {
+    try {
+      // Create worker from inline script to avoid external file dependency
+      const workerScript = `
+        // Import the AudioWorker code here
+        importScripts('${new URL('./AudioWorker.js', import.meta.url)}');
+      `;
+      
+      const blob = new Blob([workerScript], { type: 'application/javascript' });
+      this.worker = new Worker(URL.createObjectURL(blob));
+      
+      this.worker.onmessage = this.handleWorkerMessage.bind(this);
+      this.worker.onerror = (error) => {
+        console.error('Audio Worker error:', error);
+        this.useWebWorkers = false; // Fallback to main thread
+      };
+    } catch (error) {
+      console.warn('Failed to initialize Audio Worker, falling back to main thread:', error);
+      this.useWebWorkers = false;
+    }
+  }
+
+  /**
+   * Handle messages from Web Worker
+   */
+  private handleWorkerMessage(event: MessageEvent<AudioWorkerResponse>): void {
+    const { type, data } = event.data;
+    
+    switch (type) {
+      case 'ANALYSIS_COMPLETE':
+        // Handle completed audio analysis
+        if (data.progressId && this.workerCallbacks.has(data.progressId)) {
+          const callback = this.workerCallbacks.get(data.progressId);
+          if (callback) callback(null, data.result);
+          this.workerCallbacks.delete(data.progressId);
+        }
+        break;
+        
+      case 'PROGRESS_UPDATE':
+        // Handle progress updates
+        if (data.progressId && this.progressCallbacks.has(data.progressId)) {
+          const callback = this.progressCallbacks.get(data.progressId);
+          if (callback) callback(data.progress || 0, data.message || '');
+        }
+        break;
+        
+      case 'ERROR':
+        // Handle worker errors
+        console.error('Worker error:', data.error);
+        if (data.progressId && this.workerCallbacks.has(data.progressId)) {
+          const callback = this.workerCallbacks.get(data.progressId);
+          if (callback) callback(new Error(data.error || 'Worker error'), null);
+          this.workerCallbacks.delete(data.progressId);
+        }
+        break;
+    }
+  }
+
+  private workerCallbacks = new Map<string, (error: Error | null, result: any) => void>();
+  private progressCallbacks = new Map<string, (progress: number, message: string) => void>();
 
   /**
    * Initialize audio context and analyser
@@ -91,8 +172,65 @@ export class AudioProcessor {
 
   /**
    * Perform FFT analysis on audio buffer with progress tracking
+   * Uses Web Worker if available for better performance
    */
-  analyzeFrequencySpectrum(buffer: AudioBuffer, progressTracker?: ProgressTracker): FrequencyData {
+  analyzeFrequencySpectrum(buffer: AudioBuffer, progressTracker?: ProgressTracker): Promise<FrequencyData> | FrequencyData {
+    // Use Web Worker if available and buffer is large enough to benefit
+    if (this.useWebWorkers && this.worker && buffer.length > 44100) { // > 1 second of audio
+      return this.analyzeFrequencySpectrumWorker(buffer, progressTracker);
+    }
+    
+    // Fallback to main thread processing
+    return this.analyzeFrequencySpectrumMainThread(buffer, progressTracker);
+  }
+
+  /**
+   * Analyze frequency spectrum using Web Worker
+   */
+  private analyzeFrequencySpectrumWorker(buffer: AudioBuffer, progressTracker?: ProgressTracker): Promise<FrequencyData> {
+    return new Promise((resolve, reject) => {
+      if (!this.worker) {
+        reject(new Error('Web Worker not available'));
+        return;
+      }
+
+      const progressId = Math.random().toString(36).substr(2, 9);
+      const channelData = buffer.getChannelData(0);
+      
+      // Store callbacks
+      this.workerCallbacks.set(progressId, (error, result) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve(result as FrequencyData);
+        }
+      });
+
+      if (progressTracker) {
+        this.progressCallbacks.set(progressId, (progress, message) => {
+          progressTracker.updateStepProgress('frequency-analysis', progress, message);
+        });
+      }
+
+      // Send message to worker
+      const message: AudioWorkerMessage = {
+        type: 'ANALYZE_AUDIO',
+        data: {
+          audioBuffer: channelData.buffer.slice(channelData.byteOffset, channelData.byteOffset + channelData.byteLength),
+          sampleRate: buffer.sampleRate,
+          config: this.config,
+          progressId
+        }
+      };
+
+      this.worker.postMessage(message);
+    });
+  }
+
+  /**
+   * Analyze frequency spectrum on main thread (fallback)
+   */
+  private analyzeFrequencySpectrumMainThread(buffer: AudioBuffer, progressTracker?: ProgressTracker): FrequencyData {
     try {
       // Check memory usage before processing
       const memoryEstimate = globalErrorHandler.estimateMemoryUsage(buffer, 64);
@@ -202,7 +340,7 @@ export class AudioProcessor {
   /**
    * Get temporal features from audio buffer
    */
-  getTemporalFeatures(buffer: AudioBuffer): Partial<AudioFeatures> {
+  async getTemporalFeatures(buffer: AudioBuffer): Promise<Partial<AudioFeatures>> {
     const channelData = buffer.getChannelData(0);
     const sampleRate = buffer.sampleRate;
     
@@ -210,7 +348,9 @@ export class AudioProcessor {
     const zcr = this.calculateZeroCrossingRate(channelData, sampleRate);
     
     // Calculate spectral features
-    const frequencyData = this.analyzeFrequencySpectrum(buffer);
+    const frequencyDataResult = this.analyzeFrequencySpectrum(buffer);
+    const frequencyData = frequencyDataResult instanceof Promise ? await frequencyDataResult : frequencyDataResult;
+    
     const spectralCentroid = this.calculateSpectralCentroid(frequencyData);
     const spectralRolloff = this.calculateSpectralRolloff(frequencyData);
     
@@ -550,7 +690,11 @@ export class AudioProcessor {
    * Detect onsets in audio using spectral flux
    */
   private detectOnsets(buffer: AudioBuffer): number[] {
-    const frequencyData = this.analyzeFrequencySpectrum(buffer);
+    const frequencyDataResult = this.analyzeFrequencySpectrum(buffer);
+    // Handle both sync and async results
+    const frequencyData = frequencyDataResult instanceof Promise ? 
+      this.analyzeFrequencySpectrumMainThread(buffer) : frequencyDataResult;
+    
     const onsets: number[] = [];
     
     if (frequencyData.frequencies.length < 2) return onsets;

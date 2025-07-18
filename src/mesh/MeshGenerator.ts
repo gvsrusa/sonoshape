@@ -2,18 +2,39 @@ import { AudioFeatures, SculptureParams, Mesh3D, Point3D, BoundingBox, Frequency
 import { globalErrorHandler } from '../errors/ErrorHandler';
 import { ProgressTracker } from '../errors/ProgressTracker';
 import { ErrorCategory, ErrorSeverity } from '../errors/ErrorTypes';
+import { PerformanceMonitor } from '../performance/PerformanceMonitor';
 
 export class MeshGenerator {
   private resolution: number;
+  private performanceMonitor: PerformanceMonitor;
+  private optimizedSettings: boolean = true;
 
   constructor(resolution: number = 64) {
-    this.resolution = resolution;
+    this.performanceMonitor = new PerformanceMonitor();
+    
+    // Adjust resolution based on device capabilities
+    const qualitySettings = this.performanceMonitor.getQualitySettings();
+    this.resolution = qualitySettings.meshResolution || resolution;
+    
+    // Enable optimizations for low-end devices
+    const deviceCaps = this.performanceMonitor.getDeviceCapabilities();
+    this.optimizedSettings = deviceCaps.isLowEndDevice;
   }
 
   /**
    * Generate a 3D mesh from audio features and sculpture parameters with progress tracking
+   * Uses performance monitoring and automatic optimization
    */
   generateFromAudio(audioFeatures: AudioFeatures, params: SculptureParams, progressTracker?: ProgressTracker): Mesh3D {
+    return this.performanceMonitor.measureOperation('mesh-generation', () => {
+      return this.generateFromAudioInternal(audioFeatures, params, progressTracker);
+    });
+  }
+
+  /**
+   * Internal mesh generation with performance optimizations
+   */
+  private generateFromAudioInternal(audioFeatures: AudioFeatures, params: SculptureParams, progressTracker?: ProgressTracker): Mesh3D {
     try {
       // Check memory usage before processing
       const estimatedVertices = this.resolution * this.resolution;

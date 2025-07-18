@@ -8,6 +8,8 @@ export interface AudioFeatures {
   zeroCrossingRate: Float32Array;    // Noisiness measure
   mfcc: Float32Array[];              // Timbral characteristics
   tempo: number;                     // Beats per minute
+  beatTimes: number[];               // Beat timestamps
+  harmonicComplexity: Float32Array;  // Harmonic richness measure
   key: string;                       // Musical key if detectable
 }
 

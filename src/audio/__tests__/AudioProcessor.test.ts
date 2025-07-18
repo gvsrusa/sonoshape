@@ -58,46 +58,51 @@ describe("AudioProcessor", () => {
   });
 
   describe("analyzeFrequencySpectrum", () => {
-    it("should return frequency data with correct structure", () => {
-      const result: FrequencyData = processor.analyzeFrequencySpectrum(
-        mockBuffer as any
-      );
+    it("should return frequency data with correct structure", async () => {
+      const result = processor.analyzeFrequencySpectrum(mockBuffer as any);
 
-      expect(result).toHaveProperty("frequencies");
-      expect(result).toHaveProperty("timeStamps");
-      expect(result).toHaveProperty("sampleRate");
-      expect(result).toHaveProperty("fftSize");
+      // Handle both sync and async results
+      const frequencyData = result instanceof Promise ? await result : result;
 
-      expect(Array.isArray(result.frequencies)).toBe(true);
-      expect(Array.isArray(result.timeStamps)).toBe(true);
-      expect(result.sampleRate).toBe(44100);
-      expect(result.fftSize).toBe(2048);
+      expect(frequencyData).toHaveProperty("frequencies");
+      expect(frequencyData).toHaveProperty("timeStamps");
+      expect(frequencyData).toHaveProperty("sampleRate");
+      expect(frequencyData).toHaveProperty("fftSize");
+
+      expect(Array.isArray(frequencyData.frequencies)).toBe(true);
+      expect(Array.isArray(frequencyData.timeStamps)).toBe(true);
+      expect(frequencyData.sampleRate).toBe(44100);
+      expect(frequencyData.fftSize).toBe(2048);
     });
 
-    it("should generate frequency data for each time window", () => {
-      const result: FrequencyData = processor.analyzeFrequencySpectrum(
-        mockBuffer as any
+    it("should generate frequency data for each time window", async () => {
+      const result = processor.analyzeFrequencySpectrum(mockBuffer as any);
+
+      // Handle both sync and async results
+      const frequencyData = result instanceof Promise ? await result : result;
+
+      expect(frequencyData.frequencies.length).toBeGreaterThan(0);
+      expect(frequencyData.timeStamps.length).toBe(
+        frequencyData.frequencies.length
       );
 
-      expect(result.frequencies.length).toBeGreaterThan(0);
-      expect(result.timeStamps.length).toBe(result.frequencies.length);
-
       // Each frequency array should have fftSize/2 elements
-      result.frequencies.forEach((freq) => {
-        expect(freq.length).toBe(result.fftSize / 2);
+      frequencyData.frequencies.forEach((freq) => {
+        expect(freq.length).toBe(frequencyData.fftSize / 2);
       });
     });
 
-    it("should detect the dominant frequency in a sine wave", () => {
-      const result: FrequencyData = processor.analyzeFrequencySpectrum(
-        mockBuffer as any
-      );
+    it("should detect the dominant frequency in a sine wave", async () => {
+      const result = processor.analyzeFrequencySpectrum(mockBuffer as any);
+
+      // Handle both sync and async results
+      const frequencyData = result instanceof Promise ? await result : result;
 
       // For a 440Hz sine wave, we should see peak around bin corresponding to 440Hz
       const expectedBin = Math.round(
-        (440 * result.fftSize) / result.sampleRate
+        (440 * frequencyData.fftSize) / frequencyData.sampleRate
       );
-      const spectrum = result.frequencies[0];
+      const spectrum = frequencyData.frequencies[0];
 
       // Find the bin with maximum energy
       let maxBin = 0;
@@ -154,8 +159,8 @@ describe("AudioProcessor", () => {
   });
 
   describe("getTemporalFeatures", () => {
-    it("should return temporal features with expected properties", () => {
-      const result = processor.getTemporalFeatures(mockBuffer as any);
+    it("should return temporal features with expected properties", async () => {
+      const result = await processor.getTemporalFeatures(mockBuffer as any);
 
       expect(result).toHaveProperty("frequencyData");
       expect(result).toHaveProperty("spectralCentroid");
@@ -167,8 +172,8 @@ describe("AudioProcessor", () => {
       expect(result).toHaveProperty("key");
     });
 
-    it("should calculate zero crossing rate for sine wave", () => {
-      const result = processor.getTemporalFeatures(mockBuffer as any);
+    it("should calculate zero crossing rate for sine wave", async () => {
+      const result = await processor.getTemporalFeatures(mockBuffer as any);
 
       expect(result.zeroCrossingRate).toBeInstanceOf(Float32Array);
       expect(result.zeroCrossingRate!.length).toBeGreaterThan(0);
@@ -181,8 +186,8 @@ describe("AudioProcessor", () => {
       expect(avgZCR).toBeLessThan(1000);
     });
 
-    it("should calculate spectral centroid for brightness mapping", () => {
-      const result = processor.getTemporalFeatures(mockBuffer as any);
+    it("should calculate spectral centroid for brightness mapping", async () => {
+      const result = await processor.getTemporalFeatures(mockBuffer as any);
 
       expect(result.spectralCentroid).toBeInstanceOf(Float32Array);
       expect(result.spectralCentroid!.length).toBeGreaterThan(0);
@@ -201,8 +206,8 @@ describe("AudioProcessor", () => {
       expect(avgCentroid).toBeLessThan(600);
     });
 
-    it("should calculate spectral rolloff for high-frequency content analysis", () => {
-      const result = processor.getTemporalFeatures(mockBuffer as any);
+    it("should calculate spectral rolloff for high-frequency content analysis", async () => {
+      const result = await processor.getTemporalFeatures(mockBuffer as any);
 
       expect(result.spectralRolloff).toBeInstanceOf(Float32Array);
       expect(result.spectralRolloff!.length).toBeGreaterThan(0);
@@ -245,7 +250,7 @@ describe("AudioProcessor", () => {
   });
 
   describe("window functions", () => {
-    it("should apply different window functions correctly", () => {
+    it("should apply different window functions correctly", async () => {
       const processors = [
         new AudioProcessor({
           fftSize: 2048,
@@ -264,8 +269,11 @@ describe("AudioProcessor", () => {
         }),
       ];
 
-      const results = processors.map((p) =>
-        p.analyzeFrequencySpectrum(mockBuffer as any)
+      const results = await Promise.all(
+        processors.map(async (p) => {
+          const result = p.analyzeFrequencySpectrum(mockBuffer as any);
+          return result instanceof Promise ? await result : result;
+        })
       );
 
       // Results should be different for different window functions
@@ -295,7 +303,7 @@ describe("AudioProcessor", () => {
   });
 
   describe("spectral feature extraction accuracy", () => {
-    it("should distinguish between bright and dark sounds using spectral centroid", () => {
+    it("should distinguish between bright and dark sounds using spectral centroid", async () => {
       // Create bright sound (high frequencies)
       const brightBuffer = new MockAudioBuffer();
       brightBuffer.getChannelData = () => {
@@ -324,8 +332,12 @@ describe("AudioProcessor", () => {
         return data;
       };
 
-      const brightFeatures = processor.getTemporalFeatures(brightBuffer as any);
-      const darkFeatures = processor.getTemporalFeatures(darkBuffer as any);
+      const brightFeatures = await processor.getTemporalFeatures(
+        brightBuffer as any
+      );
+      const darkFeatures = await processor.getTemporalFeatures(
+        darkBuffer as any
+      );
 
       const brightCentroid =
         Array.from(brightFeatures.spectralCentroid!).reduce(
@@ -342,7 +354,7 @@ describe("AudioProcessor", () => {
       expect(darkCentroid).toBeLessThan(500); // Should be in low frequency range
     });
 
-    it("should detect high-frequency content using spectral rolloff", () => {
+    it("should detect high-frequency content using spectral rolloff", async () => {
       // Create signal with high-frequency content
       const highFreqBuffer = new MockAudioBuffer();
       highFreqBuffer.getChannelData = () => {
@@ -370,10 +382,10 @@ describe("AudioProcessor", () => {
         return data;
       };
 
-      const highFreqFeatures = processor.getTemporalFeatures(
+      const highFreqFeatures = await processor.getTemporalFeatures(
         highFreqBuffer as any
       );
-      const lowFreqFeatures = processor.getTemporalFeatures(
+      const lowFreqFeatures = await processor.getTemporalFeatures(
         lowFreqBuffer as any
       );
 
@@ -393,7 +405,7 @@ describe("AudioProcessor", () => {
       expect(highRolloff).toBeGreaterThan(2000); // Should capture high-frequency content
     });
 
-    it("should detect texture variation using zero crossing rate", () => {
+    it("should detect texture variation using zero crossing rate", async () => {
       // Create noisy/textured signal
       const noisyBuffer = new MockAudioBuffer();
       noisyBuffer.getChannelData = () => {
@@ -408,8 +420,8 @@ describe("AudioProcessor", () => {
       // Create tonal signal
       const tonalBuffer = new MockAudioBuffer(); // Uses default sine wave
 
-      const noisyFeatures = processor.getTemporalFeatures(noisyBuffer as any);
-      const tonalFeatures = processor.getTemporalFeatures(tonalBuffer as any);
+      const noisyFeatures = await processor.getTemporalFeatures(noisyBuffer as any);
+      const tonalFeatures = await processor.getTemporalFeatures(tonalBuffer as any);
 
       const noisyZCR =
         Array.from(noisyFeatures.zeroCrossingRate!).reduce((a, b) => a + b, 0) /
@@ -424,12 +436,12 @@ describe("AudioProcessor", () => {
       expect(tonalZCR).toBeLessThan(2000); // Lower ZCR for tonal content
     });
 
-    it("should handle edge cases in spectral feature extraction", () => {
+    it("should handle edge cases in spectral feature extraction", async () => {
       // Test with silence
       const silentBuffer = new MockAudioBuffer();
       silentBuffer.getChannelData = () => new Float32Array(44100); // All zeros
 
-      const silentFeatures = processor.getTemporalFeatures(silentBuffer as any);
+      const silentFeatures = await processor.getTemporalFeatures(silentBuffer as any);
 
       // Should handle silence gracefully
       expect(silentFeatures.spectralCentroid).toBeInstanceOf(Float32Array);
@@ -454,7 +466,7 @@ describe("AudioProcessor", () => {
   });
 
   describe("temporal pattern recognition", () => {
-    it("should detect tempo for rhythmic sculpture elements", () => {
+    it("should detect tempo for rhythmic sculpture elements", async () => {
       // Create rhythmic signal with clear beat pattern at 120 BPM
       const rhythmicBuffer = new MockAudioBuffer(44100, 1, 44100 * 4, 4); // 4 seconds
       rhythmicBuffer.getChannelData = () => {
@@ -479,7 +491,7 @@ describe("AudioProcessor", () => {
         return data;
       };
 
-      const features = processor.getTemporalFeatures(rhythmicBuffer as any);
+      const features = await processor.getTemporalFeatures(rhythmicBuffer as any);
 
       expect(typeof features.tempo).toBe("number");
       expect(features.tempo).toBeGreaterThan(0);
@@ -489,7 +501,7 @@ describe("AudioProcessor", () => {
       expect(features.tempo).toBeLessThan(140);
     });
 
-    it("should track beats for temporal mesh progression", () => {
+    it("should track beats for temporal mesh progression", async () => {
       // Create signal with clear beat pattern
       const beatBuffer = new MockAudioBuffer(44100, 1, 44100 * 2, 2); // 2 seconds
       beatBuffer.getChannelData = () => {
@@ -518,7 +530,7 @@ describe("AudioProcessor", () => {
         return data;
       };
 
-      const features = processor.getTemporalFeatures(beatBuffer as any);
+      const features = await processor.getTemporalFeatures(beatBuffer as any);
 
       expect(Array.isArray(features.beatTimes)).toBe(true);
       expect(features.beatTimes!.length).toBeGreaterThan(0);
@@ -538,7 +550,7 @@ describe("AudioProcessor", () => {
       }
     });
 
-    it("should analyze harmonic content for surface texture complexity", () => {
+    it("should analyze harmonic content for surface texture complexity", async () => {
       // Create harmonic-rich signal (sawtooth-like with many harmonics)
       const harmonicBuffer = new MockAudioBuffer();
       harmonicBuffer.getChannelData = () => {
@@ -563,10 +575,10 @@ describe("AudioProcessor", () => {
       // Create simple sine wave (low harmonic content)
       const simpleBuffer = new MockAudioBuffer(); // Default sine wave
 
-      const harmonicFeatures = processor.getTemporalFeatures(
+      const harmonicFeatures = await processor.getTemporalFeatures(
         harmonicBuffer as any
       );
-      const simpleFeatures = processor.getTemporalFeatures(simpleBuffer as any);
+      const simpleFeatures = await processor.getTemporalFeatures(simpleBuffer as any);
 
       expect(harmonicFeatures.harmonicComplexity).toBeInstanceOf(Float32Array);
       expect(simpleFeatures.harmonicComplexity).toBeInstanceOf(Float32Array);
@@ -587,11 +599,11 @@ describe("AudioProcessor", () => {
       expect(avgHarmonicComplexity).toBeGreaterThan(1); // Should detect multiple harmonics
     });
 
-    it("should handle temporal pattern recognition edge cases", () => {
+    it("should handle temporal pattern recognition edge cases", async () => {
       // Test with very short buffer
       const shortBuffer = new MockAudioBuffer(44100, 1, 1000, 0.023); // 23ms
 
-      const shortFeatures = processor.getTemporalFeatures(shortBuffer as any);
+      const shortFeatures = await processor.getTemporalFeatures(shortBuffer as any);
 
       // Should handle short buffers gracefully
       expect(typeof shortFeatures.tempo).toBe("number");
@@ -602,12 +614,12 @@ describe("AudioProcessor", () => {
       expect(shortFeatures.tempo).toBeLessThan(10);
     });
 
-    it("should provide consistent temporal feature measurements", () => {
+    it("should provide consistent temporal feature measurements", async () => {
       // Test consistency across multiple calls
       const testBuffer = new MockAudioBuffer();
 
-      const features1 = processor.getTemporalFeatures(testBuffer as any);
-      const features2 = processor.getTemporalFeatures(testBuffer as any);
+      const features1 = await processor.getTemporalFeatures(testBuffer as any);
+      const features2 = await processor.getTemporalFeatures(testBuffer as any);
 
       // Results should be consistent
       expect(features1.tempo).toBe(features2.tempo);
@@ -625,7 +637,7 @@ describe("AudioProcessor", () => {
       }
     });
 
-    it("should detect different rhythmic patterns", () => {
+    it("should detect different rhythmic patterns", async () => {
       // Create fast rhythm (180 BPM)
       const fastBuffer = new MockAudioBuffer(44100, 1, 44100 * 2, 2);
       fastBuffer.getChannelData = () => {
@@ -658,8 +670,8 @@ describe("AudioProcessor", () => {
         return data;
       };
 
-      const fastFeatures = processor.getTemporalFeatures(fastBuffer as any);
-      const slowFeatures = processor.getTemporalFeatures(slowBuffer as any);
+      const fastFeatures = await processor.getTemporalFeatures(fastBuffer as any);
+      const slowFeatures = await processor.getTemporalFeatures(slowBuffer as any);
 
       // Fast rhythm should have higher tempo
       expect(fastFeatures.tempo).toBeDefined();
