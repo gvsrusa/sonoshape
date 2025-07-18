@@ -1,0 +1,28 @@
+{
+  "name": "sound-wave-sculptor",
+  "version": "1.0.0",
+  "description": "Transform audio into 3D sculptural forms",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.160.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.45.0",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.0.2",
+    "vite": "^5.0.8",
+    "vitest": "^1.2.0"
+  }
+}
